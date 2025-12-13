@@ -24,7 +24,7 @@ func NewScannerService(repo repository.DomainRepository) *ScannerService {
 func (s *ScannerService) ScanAll(ctx context.Context) error {
 	// 1. 撈出所有域名 (暫時不分頁，全撈)
 	// 在真實生產環境，這裡應該只撈 "is_ignored: false" 的域名
-	domains, _, err := s.Repo.List(ctx, 1, 10000, "")
+	domains, _, err := s.Repo.List(ctx, 1, 10000, "", "")
 	if err != nil {
 		return err
 	}

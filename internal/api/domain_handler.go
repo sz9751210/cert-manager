@@ -60,8 +60,10 @@ func (h *DomainHandler) GetDomains(c *gin.Context) {
 	page, _ := strconv.ParseInt(c.DefaultQuery("page", "1"), 10, 64)
 	limit, _ := strconv.ParseInt(c.DefaultQuery("limit", "10"), 10, 64)
 	sort := c.Query("sort")
+	status := c.Query("status") // 讀取狀態參數
 
-	domains, total, err := h.Repo.List(c.Request.Context(), page, limit, sort)
+	// 將 status 傳入 List
+	domains, total, err := h.Repo.List(c.Request.Context(), page, limit, sort, status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

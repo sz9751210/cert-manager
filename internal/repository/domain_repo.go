@@ -12,7 +12,7 @@ import (
 
 type DomainRepository interface {
 	Upsert(ctx context.Context, cert domain.SSLCertificate) error
-	List(ctx context.Context, page int64, pageSize int64, sortBy string) ([]domain.SSLCertificate, int64, error)
+	List(ctx context.Context, page int64, pageSize int64, sortBy string, statusFilter string) ([]domain.SSLCertificate, int64, error)
 	UpdateCertInfo(ctx context.Context, cert domain.SSLCertificate) error
 }
 
@@ -52,18 +52,30 @@ func (r *mongoDomainRepo) Upsert(ctx context.Context, cert domain.SSLCertificate
 }
 
 // List: 支援分頁與排序
-func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, sortBy string) ([]domain.SSLCertificate, int64, error) {
-	// 1. 計算 Skip
+// 2. 修改 List 實作
+func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, sortBy string, statusFilter string) ([]domain.SSLCertificate, int64, error) {
 	skip := (page - 1) * pageSize
 
-	// 2. 設定排序 (Sort)
+	// 建構過濾條件
+	filter := bson.M{}
+
+	// 處理狀態過濾
+	if statusFilter == "unresolvable" {
+		// 只看無法解析的
+		filter["status"] = "unresolvable"
+	} else if statusFilter == "active_only" {
+		// 排除無法解析的 (顯示正常、過期、警告)
+		filter["status"] = bson.M{"$ne": "unresolvable"}
+	}
+	// 如果 statusFilter 為空，就顯示全部
+
 	sortOpts := bson.D{}
 	if sortBy == "expiry_asc" {
-		sortOpts = bson.D{{Key: "not_after", Value: 1}} // 過期日由近到遠
+		sortOpts = bson.D{{Key: "not_after", Value: 1}}
 	} else if sortBy == "expiry_desc" {
 		sortOpts = bson.D{{Key: "not_after", Value: -1}}
 	} else {
-		sortOpts = bson.D{{Key: "_id", Value: -1}} // 預設新加入的在前面
+		sortOpts = bson.D{{Key: "_id", Value: -1}}
 	}
 
 	findOptions := options.Find()
@@ -71,8 +83,7 @@ func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, 
 	findOptions.SetLimit(pageSize)
 	findOptions.SetSort(sortOpts)
 
-	// 3. 執行查詢
-	cursor, err := r.collection.Find(ctx, bson.M{}, findOptions)
+	cursor, err := r.collection.Find(ctx, filter, findOptions)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -83,8 +94,8 @@ func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, 
 		return nil, 0, err
 	}
 
-	// 4. 計算總數 (給前端分頁元件用)
-	total, err := r.collection.CountDocuments(ctx, bson.M{})
+	// 計算符合過濾條件的總數
+	total, err := r.collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return nil, 0, err
 	}
