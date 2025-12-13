@@ -1,0 +1,9 @@
+server:
+  port: ":8080"
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "cert_manager_db"
+
+cloudflare:
+  api_token: ***REMOVED*** # 開發時填入，生產環境用環境變數覆蓋
