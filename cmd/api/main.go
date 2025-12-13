@@ -61,7 +61,7 @@ func main() {
 		// [新增] 設定路由
 		v1.GET("/settings", domainHandler.GetSettings)
 		v1.POST("/settings", domainHandler.SaveSettings)
-		v1.POST("/settings/test", domainHandler.TestWebhook)
+		v1.POST("/settings/test", domainHandler.TestNotification)
 	}
 
 	// 5. Start Server

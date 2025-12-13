@@ -151,18 +151,16 @@ func (h *DomainHandler) SaveSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "設定已儲存"})
 }
 
-// [API] 測試 Webhook
-func (h *DomainHandler) TestWebhook(c *gin.Context) {
-	var req struct {
-		WebhookURL string `json:"webhook_url"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "需要 webhook_url"})
+func (h *DomainHandler) TestNotification(c *gin.Context) {
+	var settings domain.NotificationSettings
+	// 前端直接把表單填寫的設定傳過來測試，而不是只傳 URL
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
 		return
 	}
 
-	if err := h.Notifier.SendTestMessage(c.Request.Context(), req.WebhookURL); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "發送失敗: " + err.Error()})
+	if err := h.Notifier.SendTestMessage(c.Request.Context(), settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "測試訊息發送成功"})
