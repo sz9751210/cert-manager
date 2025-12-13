@@ -41,7 +41,7 @@ func main() {
 	// 設定 CORS (因為前後分離，必須允許跨域)
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE,PATCH")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -52,9 +52,11 @@ func main() {
 
 	v1 := r.Group("/api/v1")
 	{
-		v1.POST("/domains/sync", domainHandler.SyncDomains) // 觸發同步
-		v1.POST("/domains/scan", domainHandler.ScanDomains) // 觸發掃描
-		v1.GET("/domains", domainHandler.GetDomains)        // 列表查詢
+		v1.POST("/domains/sync", domainHandler.SyncDomains)             // 觸發同步
+		v1.POST("/domains/scan", domainHandler.ScanDomains)             // 觸發掃描
+		v1.GET("/domains", domainHandler.GetDomains)                    // 列表查詢
+		v1.PATCH("/domains/:id/settings", domainHandler.UpdateSettings) // 更新設定
+		v1.GET("/zones", domainHandler.GetZones)                        // [新增] 獲取下拉選單資料
 	}
 
 	// 5. Start Server

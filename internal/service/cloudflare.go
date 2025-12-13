@@ -54,6 +54,7 @@ func (s *CloudflareService) FetchDomains(ctx context.Context) ([]domain.SSLCerti
 			cert := domain.SSLCertificate{
 				DomainName: record.Name,
 				CFZoneID:   zone.ID,
+				ZoneName:   zone.Name, // [新增] 寫入主域名 (例如 example.com)
 				CFRecordID: record.ID,
 				IsProxied:  *record.Proxied,
 				IsIgnored:  false,

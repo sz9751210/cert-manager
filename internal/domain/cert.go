@@ -19,6 +19,7 @@ type SSLCertificate struct {
 
 	// Cloudflare 資訊 (用於排序和識別 Proxy)
 	CFZoneID   string `bson:"cf_zone_id" json:"cf_zone_id"`
+	ZoneName   string `bson:"zone_name" json:"zone_name"`
 	CFRecordID string `bson:"cf_record_id" json:"cf_record_id"`
 	IsProxied  bool   `bson:"is_proxied" json:"is_proxied"` // 小橘雲是否開啟
 

@@ -6,14 +6,21 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// 1. 修改介面簽章 (加入 proxiedFilter 和 ignoredFilter)
+// proxiedFilter: "true" (只顯Proxy), "false" (只顯非Proxy), "" (全部)
+// ignoredFilter: "true" (顯示忽略的), "false" (隱藏忽略的-預設)
 type DomainRepository interface {
 	Upsert(ctx context.Context, cert domain.SSLCertificate) error
-	List(ctx context.Context, page int64, pageSize int64, sortBy string, statusFilter string) ([]domain.SSLCertificate, int64, error)
+	List(ctx context.Context, page, pageSize int64, sortBy, statusFilter, proxiedFilter, ignoredFilter, zoneFilter string) ([]domain.SSLCertificate, int64, error)
 	UpdateCertInfo(ctx context.Context, cert domain.SSLCertificate) error
+	// [新增] 更新設定 (用於切換是否忽略)
+	UpdateSettings(ctx context.Context, id string, isIgnored bool) error
+	GetUniqueZones(ctx context.Context) ([]string, error)
 }
 
 type mongoDomainRepo struct {
@@ -26,6 +33,23 @@ func NewMongoDomainRepo(db *mongo.Database) DomainRepository {
 	}
 }
 
+// 1. 實作 GetUniqueZones (使用 MongoDB Distinct)
+func (r *mongoDomainRepo) GetUniqueZones(ctx context.Context) ([]string, error) {
+	// 撈出 distinct "zone_name"
+	values, err := r.collection.Distinct(ctx, "zone_name", bson.M{})
+	if err != nil {
+		return nil, err
+	}
+
+	var zones []string
+	for _, v := range values {
+		if str, ok := v.(string); ok {
+			zones = append(zones, str)
+		}
+	}
+	return zones, nil
+}
+
 // Upsert: 根據 DomainName 和 CFRecordID 判斷，有則更新，無則新增
 func (r *mongoDomainRepo) Upsert(ctx context.Context, cert domain.SSLCertificate) error {
 	filter := bson.M{
@@ -36,6 +60,7 @@ func (r *mongoDomainRepo) Upsert(ctx context.Context, cert domain.SSLCertificate
 	update := bson.M{
 		"$set": bson.M{
 			"cf_zone_id": cert.CFZoneID,
+			"zone_name":  cert.ZoneName,
 			"is_proxied": cert.IsProxied,
 			"status":     cert.Status,
 			// 注意：我們不更新 "is_ignored" 和 "auto_renew"，以免覆蓋使用者設定
@@ -53,12 +78,16 @@ func (r *mongoDomainRepo) Upsert(ctx context.Context, cert domain.SSLCertificate
 
 // List: 支援分頁與排序
 // 2. 修改 List 實作
-func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, sortBy string, statusFilter string) ([]domain.SSLCertificate, int64, error) {
+func (r *mongoDomainRepo) List(ctx context.Context, page, pageSize int64, sortBy, statusFilter, proxiedFilter, ignoredFilter, zoneFilter string) ([]domain.SSLCertificate, int64, error) {
 	skip := (page - 1) * pageSize
 
 	// 建構過濾條件
 	filter := bson.M{}
 
+	// [新增] 主域名過濾
+	if zoneFilter != "" {
+		filter["zone_name"] = zoneFilter
+	}
 	// 處理狀態過濾
 	if statusFilter == "unresolvable" {
 		// 只看無法解析的
@@ -69,6 +98,19 @@ func (r *mongoDomainRepo) List(ctx context.Context, page int64, pageSize int64, 
 	}
 	// 如果 statusFilter 為空，就顯示全部
 
+	// [新增] Proxy 過濾
+	if proxiedFilter == "true" {
+		filter["is_proxied"] = true
+	} else if proxiedFilter == "false" {
+		filter["is_proxied"] = false
+	}
+
+	// [新增] Ignore 過濾
+	// 預設我們通常不看被忽略的，除非使用者特意要看
+	if ignoredFilter == "false" || ignoredFilter == "" {
+		filter["is_ignored"] = false
+	}
+	// 如果 ignoredFilter == "true"，我們就不加這個條件，代表全部顯示 (包含忽略的)
 	sortOpts := bson.D{}
 	if sortBy == "expiry_asc" {
 		sortOpts = bson.D{{Key: "not_after", Value: 1}}
@@ -119,6 +161,17 @@ func (r *mongoDomainRepo) UpdateCertInfo(ctx context.Context, cert domain.SSLCer
 		},
 	}
 
+	_, err := r.collection.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// 3. [新增] 實作 UpdateSettings
+func (r *mongoDomainRepo) UpdateSettings(ctx context.Context, id string, isIgnored bool) error {
+	oid, _ := primitive.ObjectIDFromHex(id)
+	filter := bson.M{"_id": oid}
+	update := bson.M{
+		"$set": bson.M{"is_ignored": isIgnored},
+	}
 	_, err := r.collection.UpdateOne(ctx, filter, update)
 	return err
 }

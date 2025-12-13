@@ -17,6 +17,11 @@ type DomainHandler struct {
 	Scanner   *service.ScannerService
 }
 
+// [新增] 定義請求結構
+type UpdateSettingsRequest struct {
+	IsIgnored bool `json:"is_ignored"`
+}
+
 func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareService, s *service.ScannerService) *DomainHandler {
 	return &DomainHandler{Repo: r, CFService: c, Scanner: s}
 }
@@ -60,10 +65,12 @@ func (h *DomainHandler) GetDomains(c *gin.Context) {
 	page, _ := strconv.ParseInt(c.DefaultQuery("page", "1"), 10, 64)
 	limit, _ := strconv.ParseInt(c.DefaultQuery("limit", "10"), 10, 64)
 	sort := c.Query("sort")
-	status := c.Query("status") // 讀取狀態參數
-
+	status := c.Query("status")   // 讀取狀態參數
+	proxied := c.Query("proxied") // 读取 proxied 参数
+	ignored := c.Query("ignored") // 读取 ignored 参数 (true/false)
+	zone := c.Query("zone")
 	// 將 status 傳入 List
-	domains, total, err := h.Repo.List(c.Request.Context(), page, limit, sort, status)
+	domains, total, err := h.Repo.List(c.Request.Context(), page, limit, sort, status, proxied, ignored, zone)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -77,6 +84,16 @@ func (h *DomainHandler) GetDomains(c *gin.Context) {
 	})
 }
 
+// 2. [新增] GetZones API
+func (h *DomainHandler) GetZones(c *gin.Context) {
+	zones, err := h.Repo.GetUniqueZones(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": zones})
+}
+
 // ScanDomains 手動觸發 SSL 掃描
 // @Router /api/v1/domains/scan [post]
 func (h *DomainHandler) ScanDomains(c *gin.Context) {
@@ -88,4 +105,22 @@ func (h *DomainHandler) ScanDomains(c *gin.Context) {
 	}()
 
 	c.JSON(http.StatusOK, gin.H{"message": "掃描任務已在背景啟動"})
+}
+
+// [新增] UpdateSettings Handler
+// @Router /api/v1/domains/:id/settings [patch]
+func (h *DomainHandler) UpdateSettings(c *gin.Context) {
+	id := c.Param("id")
+	var req UpdateSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid body"})
+		return
+	}
+
+	if err := h.Repo.UpdateSettings(c.Request.Context(), id, req.IsIgnored); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "設定已更新"})
 }
