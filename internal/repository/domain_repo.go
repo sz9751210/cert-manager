@@ -105,9 +105,12 @@ func (r *mongoDomainRepo) List(ctx context.Context, page, pageSize int64, sortBy
 		filter["is_proxied"] = false
 	}
 
-	// [新增] Ignore 過濾
-	// 預設我們通常不看被忽略的，除非使用者特意要看
-	if ignoredFilter == "false" || ignoredFilter == "" {
+	// [修改這裡] 更精確的忽略狀態過濾
+	if ignoredFilter == "true" {
+		// 模式 A: 只顯示「已忽略」的域名 (給新頁面用)
+		filter["is_ignored"] = true
+	} else if ignoredFilter == "false" || ignoredFilter == "" {
+		// 模式 B: 只顯示「監控中」的域名 (給儀表板用 - 預設)
 		filter["is_ignored"] = false
 	}
 	// 如果 ignoredFilter == "true"，我們就不加這個條件，代表全部顯示 (包含忽略的)
