@@ -165,3 +165,13 @@ func (h *DomainHandler) TestNotification(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "測試訊息發送成功"})
 }
+
+// GetStatistics 獲取儀表板數據
+func (h *DomainHandler) GetStatistics(c *gin.Context) {
+	stats, err := h.Repo.GetStatistics(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": stats})
+}

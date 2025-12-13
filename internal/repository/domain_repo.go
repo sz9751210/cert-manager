@@ -28,10 +28,74 @@ type DomainRepository interface {
 
 	// [新增] 更新告警時間
 	UpdateAlertTime(ctx context.Context, domainID primitive.ObjectID) error
+
+	GetStatistics(ctx context.Context) (*domain.DashboardStats, error)
 }
 
 type mongoDomainRepo struct {
 	collection *mongo.Collection
+}
+
+// 實作 GetStatistics
+func (r *mongoDomainRepo) GetStatistics(ctx context.Context) (*domain.DashboardStats, error) {
+	stats := &domain.DashboardStats{
+		StatusCounts: make(map[string]int),
+		ExpiryCounts: make(map[string]int),
+		IssuerCounts: make(map[string]int),
+	}
+
+	// 1. 總數 (只算未忽略的)
+	total, _ := r.collection.CountDocuments(ctx, bson.M{"is_ignored": false})
+	stats.TotalDomains = total
+
+	// 2. 撈取所有未忽略的資料進行統計 (如果資料量 < 10萬，直接用 Find 遍歷記憶體統計通常比 Aggregation Pipeline 寫起來簡單且夠快)
+	// 為了教學簡單，我們這裡採用「查出所有簡要欄位」在 Go 裡面算，這比寫 MongoDB 複雜 pipeline 容易除錯
+	cursor, err := r.collection.Find(ctx, bson.M{"is_ignored": false}, options.Find().SetProjection(bson.M{
+		"status": 1, "days_remaining": 1, "issuer": 1,
+	}))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	type miniCert struct {
+		Status        string `bson:"status"`
+		DaysRemaining int    `bson:"days_remaining"`
+		Issuer        string `bson:"issuer"`
+	}
+
+	for cursor.Next(ctx) {
+		var c miniCert
+		if err := cursor.Decode(&c); err != nil {
+			continue
+		}
+
+		// 統計狀態
+		stats.StatusCounts[c.Status]++
+
+		// 統計發行商 (簡單清理字串)
+		if c.Issuer != "" {
+			stats.IssuerCounts[c.Issuer]++
+		} else {
+			stats.IssuerCounts["Unknown"]++
+		}
+
+		// 統計過期區間
+		// 注意：只有 active/warning 的才需要算剩餘天數
+		if c.Status != "unresolvable" && c.Status != "pending" {
+			if c.DaysRemaining < 7 {
+				stats.ExpiryCounts["d7"]++
+			}
+			if c.DaysRemaining < 30 {
+				stats.ExpiryCounts["d30"]++
+			}
+			if c.DaysRemaining < 90 {
+				stats.ExpiryCounts["d90"]++
+			}
+		}
+	}
+
+	return stats, nil
 }
 
 func NewMongoDomainRepo(db *mongo.Database) DomainRepository {

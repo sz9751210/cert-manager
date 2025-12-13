@@ -62,6 +62,7 @@ func main() {
 		v1.GET("/settings", domainHandler.GetSettings)
 		v1.POST("/settings", domainHandler.SaveSettings)
 		v1.POST("/settings/test", domainHandler.TestNotification)
+		v1.GET("/stats", domainHandler.GetStatistics)
 	}
 
 	// 5. Start Server
