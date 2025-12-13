@@ -31,9 +31,10 @@ func main() {
 	// 3. Dependency Injection (依賴注入)
 	// Repo -> Service -> Handler
 	domainRepo := repository.NewMongoDomainRepo(db)
+	notifierService := service.NewNotifierService(domainRepo)
 	cfService := service.NewCloudflareService(cfg.Cloudflare.APIToken)
-	scannerService := service.NewScannerService(domainRepo)
-	domainHandler := api.NewDomainHandler(domainRepo, cfService, scannerService)
+	scannerService := service.NewScannerService(domainRepo, notifierService)
+	domainHandler := api.NewDomainHandler(domainRepo, cfService, scannerService, notifierService)
 
 	// 4. Gin Router Setup
 	r := gin.Default()
@@ -57,6 +58,10 @@ func main() {
 		v1.GET("/domains", domainHandler.GetDomains)                    // 列表查詢
 		v1.PATCH("/domains/:id/settings", domainHandler.UpdateSettings) // 更新設定
 		v1.GET("/zones", domainHandler.GetZones)                        // [新增] 獲取下拉選單資料
+		// [新增] 設定路由
+		v1.GET("/settings", domainHandler.GetSettings)
+		v1.POST("/settings", domainHandler.SaveSettings)
+		v1.POST("/settings/test", domainHandler.TestWebhook)
 	}
 
 	// 5. Start Server

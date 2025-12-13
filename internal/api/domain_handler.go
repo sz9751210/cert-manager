@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cert-manager/internal/domain"
 	"cert-manager/internal/repository"
 	"cert-manager/internal/service"
 	"context"
@@ -15,6 +16,7 @@ type DomainHandler struct {
 	Repo      repository.DomainRepository
 	CFService *service.CloudflareService
 	Scanner   *service.ScannerService
+	Notifier  *service.NotifierService
 }
 
 // [新增] 定義請求結構
@@ -22,8 +24,8 @@ type UpdateSettingsRequest struct {
 	IsIgnored bool `json:"is_ignored"`
 }
 
-func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareService, s *service.ScannerService) *DomainHandler {
-	return &DomainHandler{Repo: r, CFService: c, Scanner: s}
+func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareService, s *service.ScannerService, n *service.NotifierService) *DomainHandler {
+	return &DomainHandler{Repo: r, CFService: c, Scanner: s, Notifier: n}
 }
 
 // SyncDomains godoc
@@ -123,4 +125,45 @@ func (h *DomainHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "設定已更新"})
+}
+
+// [API] 獲取設定
+func (h *DomainHandler) GetSettings(c *gin.Context) {
+	settings, err := h.Repo.GetSettings(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": settings})
+}
+
+// [API] 儲存設定
+func (h *DomainHandler) SaveSettings(c *gin.Context) {
+	var settings domain.NotificationSettings
+	if err := c.ShouldBindJSON(&settings); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	if err := h.Repo.SaveSettings(c.Request.Context(), settings); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "設定已儲存"})
+}
+
+// [API] 測試 Webhook
+func (h *DomainHandler) TestWebhook(c *gin.Context) {
+	var req struct {
+		WebhookURL string `json:"webhook_url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "需要 webhook_url"})
+		return
+	}
+
+	if err := h.Notifier.SendTestMessage(c.Request.Context(), req.WebhookURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "發送失敗: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "測試訊息發送成功"})
 }

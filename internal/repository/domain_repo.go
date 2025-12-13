@@ -21,6 +21,13 @@ type DomainRepository interface {
 	// [新增] 更新設定 (用於切換是否忽略)
 	UpdateSettings(ctx context.Context, id string, isIgnored bool) error
 	GetUniqueZones(ctx context.Context) ([]string, error)
+
+	// [新增] 設定相關
+	GetSettings(ctx context.Context) (*domain.NotificationSettings, error)
+	SaveSettings(ctx context.Context, settings domain.NotificationSettings) error
+
+	// [新增] 更新告警時間
+	UpdateAlertTime(ctx context.Context, domainID primitive.ObjectID) error
 }
 
 type mongoDomainRepo struct {
@@ -175,6 +182,38 @@ func (r *mongoDomainRepo) UpdateSettings(ctx context.Context, id string, isIgnor
 	update := bson.M{
 		"$set": bson.M{"is_ignored": isIgnored},
 	}
+	_, err := r.collection.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// [實作] GetSettings
+func (r *mongoDomainRepo) GetSettings(ctx context.Context) (*domain.NotificationSettings, error) {
+	// 我們將設定存放在一個獨立的 collection 叫 "settings"
+	// 因為只有一筆全域設定，我們固定 ID 或只取第一筆
+	coll := r.collection.Database().Collection("settings")
+
+	var settings domain.NotificationSettings
+	// 嘗試抓取第一筆
+	err := coll.FindOne(ctx, bson.M{}).Decode(&settings)
+	if err == mongo.ErrNoDocuments {
+		return &domain.NotificationSettings{}, nil // 回傳空設定
+	}
+	return &settings, err
+}
+
+// [實作] SaveSettings
+func (r *mongoDomainRepo) SaveSettings(ctx context.Context, settings domain.NotificationSettings) error {
+	coll := r.collection.Database().Collection("settings")
+	// 使用 Upsert，確保只有一筆設定
+	opts := options.Update().SetUpsert(true)
+	_, err := coll.UpdateOne(ctx, bson.M{}, bson.M{"$set": settings}, opts)
+	return err
+}
+
+// [實作] UpdateAlertTime
+func (r *mongoDomainRepo) UpdateAlertTime(ctx context.Context, domainID primitive.ObjectID) error {
+	filter := bson.M{"_id": domainID}
+	update := bson.M{"$set": bson.M{"last_alert_time": time.Now()}}
 	_, err := r.collection.UpdateOne(ctx, filter, update)
 	return err
 }

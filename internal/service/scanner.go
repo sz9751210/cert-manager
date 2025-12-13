@@ -13,11 +13,12 @@ import (
 )
 
 type ScannerService struct {
-	Repo repository.DomainRepository
+	Repo     repository.DomainRepository
+	Notifier *NotifierService
 }
 
-func NewScannerService(repo repository.DomainRepository) *ScannerService {
-	return &ScannerService{Repo: repo}
+func NewScannerService(repo repository.DomainRepository, notifier *NotifierService) *ScannerService {
+	return &ScannerService{Repo: repo, Notifier: notifier}
 }
 
 // ScanAll 啟動併發掃描
@@ -97,4 +98,5 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 	if err := s.Repo.UpdateCertInfo(ctx, d); err != nil {
 		logrus.Errorf("更新資料庫失敗 %s: %v", d.DomainName, err)
 	}
+	s.Notifier.CheckAndNotify(ctx, d)
 }
