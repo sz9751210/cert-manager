@@ -39,4 +39,7 @@ type SSLCertificate struct {
 	ErrorMsg      string    `bson:"error_msg,omitempty" json:"error_msg"`
 	// [新增] 記錄上次發送告警的時間，避免頻繁轟炸
 	LastAlertTime time.Time `bson:"last_alert_time" json:"last_alert_time"`
+
+	// [新增] 憑證包含的所有域名 (Subject Alternative Names)
+	SANs []string `bson:"sans" json:"sans"`
 }

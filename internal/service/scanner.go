@@ -81,7 +81,7 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 			d.NotBefore = cert.NotBefore
 			d.NotAfter = cert.NotAfter
 			d.DaysRemaining = int(time.Until(cert.NotAfter).Hours() / 24)
-
+			d.SANs = cert.DNSNames
 			// 判斷狀態
 			if d.DaysRemaining < 0 {
 				d.Status = domain.StatusExpired

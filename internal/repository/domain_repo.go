@@ -235,6 +235,7 @@ func (r *mongoDomainRepo) UpdateCertInfo(ctx context.Context, cert domain.SSLCer
 			"days_remaining":  cert.DaysRemaining,
 			"status":          cert.Status,
 			"error_msg":       cert.ErrorMsg,
+			"sans":            cert.SANs,
 			"last_check_time": time.Now(),
 		},
 	}
