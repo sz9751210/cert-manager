@@ -244,6 +244,11 @@ func (h *DomainHandler) BatchUpdateSettings(c *gin.Context) {
 		}
 	}
 
+	if len(objectIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "沒有有效的 ID"})
+		return
+	}
+
 	if err := h.Repo.BatchUpdateSettings(c.Request.Context(), objectIDs, req.IsIgnored); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -263,14 +268,17 @@ func (h *DomainHandler) ExportDomains(c *gin.Context) {
 	}
 
 	// 2. 設定 Response Header 讓瀏覽器下載
-	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", "attachment;filename=domains_report.csv")
+
+	// 【關鍵】寫入 UTF-8 BOM，讓 Excel 能正確識別中文
+	c.Writer.Write([]byte("\xEF\xBB\xBF"))
 
 	// 3. 寫入 CSV
 	writer := csv.NewWriter(c.Writer)
 	// 寫入 Header
 	writer.Write([]string{"Domain", "Issuer", "Expiry Date", "Days Left", "Status", "Proxy", "Zone"})
-
+	// writer.Write([]string{"域名", "狀態", "剩餘天數", "過期日", "發行商", "主域名", "Proxy開啟"})
 	// 寫入資料
 	for _, d := range domains {
 		writer.Write([]string{
