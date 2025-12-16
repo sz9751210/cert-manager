@@ -42,4 +42,8 @@ type SSLCertificate struct {
 
 	// [新增] 憑證包含的所有域名 (Subject Alternative Names)
 	SANs []string `bson:"sans" json:"sans"`
+
+	TLSVersion     string `bson:"tls_version" json:"tls_version"`           // e.g. "TLS 1.3"
+	HTTPStatusCode int    `bson:"http_status_code" json:"http_status_code"` // e.g. 200, 404, 500
+	Latency        int64  `bson:"latency" json:"latency"`                   // 毫秒 (ms)
 }

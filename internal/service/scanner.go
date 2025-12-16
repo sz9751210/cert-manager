@@ -5,7 +5,9 @@ import (
 	"cert-manager/internal/repository"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -57,7 +59,39 @@ func (s *ScannerService) ScanAll(ctx context.Context) error {
 func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertificate) {
 	logrus.Debugf("Checking: %s", d.DomainName)
 
-	// 設定連線逾時，避免卡死
+	start := time.Now()
+
+	// --- 步驟 1: 檢查 HTTP 存活狀態 (Uptime) ---
+	// 設定較短的 timeout，避免卡住太久
+	httpClient := &http.Client{
+		Timeout: 5 * time.Second,
+		// 因為我們還要單獨測 SSL，這裡的 HTTP 請求先忽略憑證錯誤，專注看能不能連上
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	// 嘗試連線 https://...
+	resp, err := httpClient.Get("https://" + d.DomainName)
+	if err != nil {
+		// 如果連不上 (例如 DNS 錯誤或連線被拒)
+		d.HTTPStatusCode = 0
+		// 這裡不一定要設為 Unresolvable，因為可能只是 Web Server 掛了但 IP 還在
+		// 為了簡單，我們先記錄錯誤
+		d.ErrorMsg = fmt.Sprintf("HTTP Error: %v", err)
+	} else {
+		d.HTTPStatusCode = resp.StatusCode
+		resp.Body.Close()
+
+		// 如果 HTTP 成功，清除之前的錯誤訊息 (除非 SSL 還有錯)
+		if d.Status != domain.StatusExpired {
+			d.ErrorMsg = ""
+		}
+	}
+
+	// 計算延遲
+	d.Latency = time.Since(start).Milliseconds()
+
 	dialer := &net.Dialer{
 		Timeout: 5 * time.Second,
 	}
@@ -73,7 +107,23 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 		d.ErrorMsg = err.Error()
 	} else {
 		defer conn.Close()
+		state := conn.ConnectionState()
 		certs := conn.ConnectionState().PeerCertificates
+
+		// 解析 TLS 版本
+		switch state.Version {
+		case tls.VersionTLS10:
+			d.TLSVersion = "TLS 1.0"
+		case tls.VersionTLS11:
+			d.TLSVersion = "TLS 1.1"
+		case tls.VersionTLS12:
+			d.TLSVersion = "TLS 1.2"
+		case tls.VersionTLS13:
+			d.TLSVersion = "TLS 1.3"
+		default:
+			d.TLSVersion = "Unknown"
+		}
+
 		if len(certs) > 0 {
 			cert := certs[0] // 拿第一張 (Server Certificate)
 
@@ -90,7 +140,6 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 			} else {
 				d.Status = domain.StatusActive
 			}
-			d.ErrorMsg = "" // 清除之前的錯誤
 		}
 	}
 

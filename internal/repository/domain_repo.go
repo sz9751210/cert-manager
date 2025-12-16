@@ -229,14 +229,17 @@ func (r *mongoDomainRepo) UpdateCertInfo(ctx context.Context, cert domain.SSLCer
 
 	update := bson.M{
 		"$set": bson.M{
-			"issuer":          cert.Issuer,
-			"not_before":      cert.NotBefore,
-			"not_after":       cert.NotAfter,
-			"days_remaining":  cert.DaysRemaining,
-			"status":          cert.Status,
-			"error_msg":       cert.ErrorMsg,
-			"sans":            cert.SANs,
-			"last_check_time": time.Now(),
+			"issuer":           cert.Issuer,
+			"not_before":       cert.NotBefore,
+			"not_after":        cert.NotAfter,
+			"days_remaining":   cert.DaysRemaining,
+			"status":           cert.Status,
+			"error_msg":        cert.ErrorMsg,
+			"sans":             cert.SANs,
+			"last_check_time":  time.Now(),
+			"tls_version":      cert.TLSVersion,
+			"http_status_code": cert.HTTPStatusCode,
+			"latency":          cert.Latency,
 		},
 	}
 
