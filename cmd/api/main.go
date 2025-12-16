@@ -34,8 +34,8 @@ func main() {
 	notifierService := service.NewNotifierService(domainRepo)
 	cfService := service.NewCloudflareService(cfg.Cloudflare.APIToken)
 	scannerService := service.NewScannerService(domainRepo, notifierService)
-	domainHandler := api.NewDomainHandler(domainRepo, cfService, scannerService, notifierService)
-
+	acmeService := service.NewAcmeService(domainRepo, cfg.Cloudflare.APIToken)
+	domainHandler := api.NewDomainHandler(domainRepo, cfService, scannerService, notifierService, acmeService)
 	// 4. Gin Router Setup
 	r := gin.Default()
 

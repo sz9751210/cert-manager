@@ -30,6 +30,8 @@ type DomainRepository interface {
 	UpdateAlertTime(ctx context.Context, domainID primitive.ObjectID) error
 
 	GetStatistics(ctx context.Context) (*domain.DashboardStats, error)
+
+	UpdateAcmeData(ctx context.Context, email, privateKey, regData string) error
 }
 
 type mongoDomainRepo struct {
@@ -279,5 +281,23 @@ func (r *mongoDomainRepo) UpdateAlertTime(ctx context.Context, domainID primitiv
 	filter := bson.M{"_id": domainID}
 	update := bson.M{"$set": bson.M{"last_alert_time": time.Now()}}
 	_, err := r.collection.UpdateOne(ctx, filter, update)
+	return err
+}
+
+// 實作
+func (r *mongoDomainRepo) UpdateAcmeData(ctx context.Context, email, privateKey, regData string) error {
+	coll := r.collection.Database().Collection("settings")
+	update := bson.M{"$set": bson.M{}}
+	if email != "" {
+		update["$set"].(bson.M)["acme_email"] = email
+	}
+	if privateKey != "" {
+		update["$set"].(bson.M)["acme_private_key"] = privateKey
+	}
+	if regData != "" {
+		update["$set"].(bson.M)["acme_reg_data"] = regData
+	}
+
+	_, err := coll.UpdateOne(ctx, bson.M{}, update, options.Update().SetUpsert(true))
 	return err
 }

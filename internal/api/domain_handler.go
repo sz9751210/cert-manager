@@ -17,6 +17,7 @@ type DomainHandler struct {
 	CFService *service.CloudflareService
 	Scanner   *service.ScannerService
 	Notifier  *service.NotifierService
+	Acme      *service.AcmeService
 }
 
 // [新增] 定義請求結構
@@ -24,8 +25,8 @@ type UpdateSettingsRequest struct {
 	IsIgnored bool `json:"is_ignored"`
 }
 
-func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareService, s *service.ScannerService, n *service.NotifierService) *DomainHandler {
-	return &DomainHandler{Repo: r, CFService: c, Scanner: s, Notifier: n}
+func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareService, s *service.ScannerService, n *service.NotifierService, acme *service.AcmeService) *DomainHandler {
+	return &DomainHandler{Repo: r, CFService: c, Scanner: s, Notifier: n, Acme: acme}
 }
 
 // SyncDomains godoc
@@ -174,4 +175,49 @@ func (h *DomainHandler) GetStatistics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": stats})
+}
+
+// [API] 觸發續簽
+func (h *DomainHandler) RenewCertificate(c *gin.Context) {
+	c.Param("id")
+	// 先查出域名
+	// (這裡需要 Repo 支援 GetByID，或者我們先簡單用參數傳 DomainName)
+	// 為了安全，應該傳 ID 然後由後端查 DomainName
+	// 這裡假設前端傳 JSON body: { "domain": "example.com" }
+
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "需要 domain 參數"})
+		return
+	}
+
+	// 非同步執行，因為申請憑證可能要 10-30 秒
+	go func() {
+		if err := h.Acme.RenewCertificate(context.Background(), req.Domain); err != nil {
+			logrus.Errorf("續簽失敗 %s: %v", req.Domain, err)
+		} else {
+			logrus.Infof("續簽成功 %s", req.Domain)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"message": "續簽請求已排入背景處理"})
+}
+
+// [API] 儲存 ACME Email
+func (h *DomainHandler) SaveAcmeSettings(c *gin.Context) {
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "需要 email"})
+		return
+	}
+
+	if err := h.Repo.UpdateAcmeData(c.Request.Context(), req.Email, "", ""); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Let's Encrypt Email 已儲存"})
 }
