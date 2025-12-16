@@ -86,10 +86,12 @@ func main() {
 		v1.PATCH("/domains/:id/settings", domainHandler.UpdateSettings) // 更新設定
 		v1.GET("/zones", domainHandler.GetZones)                        // [新增] 獲取下拉選單資料
 		// [新增] 設定路由
-		v1.GET("/settings", domainHandler.GetSettings)
-		v1.POST("/settings", domainHandler.SaveSettings)
-		v1.POST("/settings/test", domainHandler.TestNotification)
-		v1.GET("/stats", domainHandler.GetStatistics)
+		v1.GET("/settings", domainHandler.GetSettings)                        // [新增] 獲取
+		v1.POST("/settings", domainHandler.SaveSettings)                      // [新增] 儲存
+		v1.POST("/settings/test", domainHandler.TestNotification)             // [新增] 測試通知
+		v1.GET("/stats", domainHandler.GetStatistics)                         // [新增] 獲取儀表板數據
+		v1.POST("/domains/batch-settings", domainHandler.BatchUpdateSettings) // [新增] 批量更新
+		v1.GET("/domains/export", domainHandler.ExportDomains)                // [新增] 匯出
 	}
 
 	// 5. Start Server

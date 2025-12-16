@@ -32,6 +32,8 @@ type DomainRepository interface {
 	GetStatistics(ctx context.Context) (*domain.DashboardStats, error)
 
 	UpdateAcmeData(ctx context.Context, email, privateKey, regData string) error
+
+	BatchUpdateSettings(ctx context.Context, ids []primitive.ObjectID, isIgnored bool) error // [新增]
 }
 
 type mongoDomainRepo struct {
@@ -299,5 +301,13 @@ func (r *mongoDomainRepo) UpdateAcmeData(ctx context.Context, email, privateKey,
 	}
 
 	_, err := coll.UpdateOne(ctx, bson.M{}, update, options.Update().SetUpsert(true))
+	return err
+}
+
+func (r *mongoDomainRepo) BatchUpdateSettings(ctx context.Context, ids []primitive.ObjectID, isIgnored bool) error {
+	filter := bson.M{"_id": bson.M{"$in": ids}}
+	update := bson.M{"$set": bson.M{"is_ignored": isIgnored}}
+
+	_, err := r.collection.UpdateMany(ctx, filter, update)
 	return err
 }

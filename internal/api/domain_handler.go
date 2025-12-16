@@ -5,11 +5,14 @@ import (
 	"cert-manager/internal/repository"
 	"cert-manager/internal/service"
 	"context"
+	"encoding/csv"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type DomainHandler struct {
@@ -220,4 +223,65 @@ func (h *DomainHandler) SaveAcmeSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Let's Encrypt Email 已儲存"})
+}
+
+// [API] 批量更新設定
+func (h *DomainHandler) BatchUpdateSettings(c *gin.Context) {
+	var req struct {
+		IDs       []string `json:"ids"`
+		IsIgnored bool     `json:"is_ignored"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	// 轉換 string ID 為 ObjectID
+	var objectIDs []primitive.ObjectID
+	for _, id := range req.IDs {
+		if oid, err := primitive.ObjectIDFromHex(id); err == nil {
+			objectIDs = append(objectIDs, oid)
+		}
+	}
+
+	if err := h.Repo.BatchUpdateSettings(c.Request.Context(), objectIDs, req.IsIgnored); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "批量更新成功"})
+}
+
+// [API] 匯出 CSV
+func (h *DomainHandler) ExportDomains(c *gin.Context) {
+	// 1. 撈取所有資料 (依照目前的過濾條件，這裡簡化為撈全部 active 的)
+	// 實務上您可能需要把 List 的參數都傳進來做篩選
+	domains, _, err := h.Repo.List(c.Request.Context(), 1, 10000, "expiry_asc", "", "", "false", "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 2. 設定 Response Header 讓瀏覽器下載
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", "attachment;filename=domains_report.csv")
+
+	// 3. 寫入 CSV
+	writer := csv.NewWriter(c.Writer)
+	// 寫入 Header
+	writer.Write([]string{"Domain", "Issuer", "Expiry Date", "Days Left", "Status", "Proxy", "Zone"})
+
+	// 寫入資料
+	for _, d := range domains {
+		writer.Write([]string{
+			d.DomainName,
+			d.Issuer,
+			d.NotAfter.Format("2006-01-02"),
+			fmt.Sprintf("%d", d.DaysRemaining),
+			string(d.Status),
+			fmt.Sprintf("%v", d.IsProxied),
+			d.ZoneName,
+		})
+	}
+	writer.Flush()
 }
