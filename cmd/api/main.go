@@ -37,6 +37,11 @@ func main() {
 	scannerService := service.NewScannerService(domainRepo, notifierService)
 	acmeService := service.NewAcmeService(domainRepo, cfg.Cloudflare.APIToken)
 	domainHandler := api.NewDomainHandler(domainRepo, cfService, scannerService, notifierService, acmeService)
+
+	// 初始化 Scheduler
+	scheduler := service.NewSchedulerService(scannerService, cfService)
+	scheduler.Start()      // 啟動！
+	defer scheduler.Stop() // 程式結束時關閉
 	// 4. Gin Router Setup
 	r := gin.Default()
 
