@@ -36,19 +36,23 @@ func (s *ScannerService) ScanAll(ctx context.Context) error {
 
 	logrus.Infof("開始掃描 %d 個域名...", len(domains))
 
-	// 2. 使用 WaitGroup 和 Channel 控制併發 (Worker Pool 模式)
+	// 定義併發數量 (例如同時 10 個 Worker)
+	concurrency := 10
+	// 使用 buffered channel 作為信號量 (Semaphore) 來控制併發
+	sem := make(chan struct{}, concurrency)
+
+	// 使用 WaitGroup 和 Channel 控制併發 (Worker Pool 模式)
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 10) // 限制同時最多 10 個掃描連線，避免把自己頻寬塞爆
 
 	for _, d := range domains {
 		wg.Add(1)
 		sem <- struct{}{} // 搶票
 
-		go func(target domain.SSLCertificate) {
+		go func(cert domain.SSLCertificate) {
 			defer wg.Done()
 			defer func() { <-sem }() // 還票
 
-			s.checkAndUpdate(ctx, target)
+			s.checkAndUpdate(ctx, cert)
 		}(d)
 	}
 
