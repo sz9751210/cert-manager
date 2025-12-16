@@ -7,6 +7,7 @@ import (
 	"cert-manager/internal/repository"
 	"cert-manager/internal/service"
 	"context"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -51,7 +52,33 @@ func main() {
 		c.Next()
 	})
 
+	// 初始化 Auth Service
+	// 注意：這裡的 Secret "my-secret-key" 在生產環境應該從 config 讀取
+	authService := service.NewAuthService(mongoClient.Database(cfg.MongoDB.Database), "my-secret-key")
+	authService.InitAdmin() // 確保有預設帳號 (admin / admin123)
+
+	// Login Handler (簡單寫在這裡或是移到 api package)
+	r.POST("/api/login", func(c *gin.Context) {
+		var req struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "格式錯誤"})
+			return
+		}
+		token, err := authService.Login(c.Request.Context(), req.Username, req.Password)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"token": token})
+	})
+
+	// API V1 Group (受保護)
 	v1 := r.Group("/api/v1")
+	v1.Use(api.AuthMiddleware("my-secret-key")) // <--- 掛上守門員
+
 	{
 		v1.POST("/domains/sync", domainHandler.SyncDomains)             // 觸發同步
 		v1.POST("/domains/scan", domainHandler.ScanDomains)             // 觸發掃描
