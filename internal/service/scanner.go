@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/likexian/whois"
+	whois_parser "github.com/likexian/whois-parser"
 	"github.com/sirupsen/logrus"
 )
 
@@ -140,6 +142,25 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 			} else {
 				d.Status = domain.StatusActive
 			}
+		}
+	}
+
+	// --- 步驟 3: 網域 Whois 查詢 (新增) ---
+	// 只有當域名是 "active" 且不是內網域名時才查 (避免查 localhost 或 internal DNS)
+	// 這裡簡單用「是否有點」來判斷，或是依賴使用者標記
+	if d.Status != domain.StatusUnresolvable {
+		// 使用根域名查詢 (例如 api.google.com -> google.com)
+		// 這裡為了簡單，我們先直接查完整域名，whois client 通常夠聰明能處理
+		raw, err := whois.Whois(d.DomainName)
+		if err == nil {
+			result, err := whois_parser.Parse(raw)
+			if err == nil && result.Domain.ExpirationDateInTime != nil {
+				d.DomainExpiryDate = *result.Domain.ExpirationDateInTime
+				d.DomainDaysLeft = int(time.Until(d.DomainExpiryDate).Hours() / 24)
+			}
+		} else {
+			// Whois 失敗通常不記錄 error_msg，以免干擾 SSL 的錯誤顯示
+			logrus.Warnf("Whois 查詢失敗 %s: %v", d.DomainName, err)
 		}
 	}
 

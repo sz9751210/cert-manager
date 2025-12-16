@@ -46,4 +46,8 @@ type SSLCertificate struct {
 	TLSVersion     string `bson:"tls_version" json:"tls_version"`           // e.g. "TLS 1.3"
 	HTTPStatusCode int    `bson:"http_status_code" json:"http_status_code"` // e.g. 200, 404, 500
 	Latency        int64  `bson:"latency" json:"latency"`                   // 毫秒 (ms)
+
+	// [新增] 網域註冊資訊
+	DomainExpiryDate time.Time `bson:"domain_expiry_date" json:"domain_expiry_date"`
+	DomainDaysLeft   int       `bson:"domain_days_left" json:"domain_days_left"`
 }

@@ -36,6 +36,10 @@ func (n *NotifierService) CheckAndNotify(ctx context.Context, cert domain.SSLCer
 	if cert.DaysRemaining < 14 && cert.DaysRemaining >= 0 {
 		shouldNotify = true
 	}
+	// [新增] 網域過期檢查 (例如少於 30 天)
+	if cert.DomainDaysLeft < 30 && cert.DomainDaysLeft > 0 {
+		shouldNotify = true
+	}
 	if cert.Status == domain.StatusUnresolvable {
 		shouldNotify = true
 	}
@@ -55,9 +59,10 @@ func (n *NotifierService) CheckAndNotify(ctx context.Context, cert domain.SSLCer
 	}
 
 	// 4. 組裝訊息
-	msg := fmt.Sprintf("⚠️ *[憑證告警]*\n域名: `%s`\n狀態: %s\n剩餘天數: %d 天\n發行商: %s",
-		cert.DomainName, cert.Status, cert.DaysRemaining, cert.Issuer)
-
+	msg := fmt.Sprintf(
+		"⚠️ *[監控告警]*\n域名: `%s`\nSSL 剩餘: %d 天\n網域 剩餘: %d 天\n狀態: %s",
+		cert.DomainName, cert.DaysRemaining, cert.DomainDaysLeft, cert.Status,
+	)
 	// 5. 依序發送各管道
 	sentCount := 0
 
