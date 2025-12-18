@@ -34,6 +34,10 @@ type DomainRepository interface {
 	UpdateAcmeData(ctx context.Context, email, privateKey, regData string) error
 
 	BatchUpdateSettings(ctx context.Context, ids []primitive.ObjectID, isIgnored bool) error // [新增]
+
+	Create(ctx context.Context, cert domain.SSLCertificate) error
+	GetByID(ctx context.Context, id primitive.ObjectID) (*domain.SSLCertificate, error)
+	Delete(ctx context.Context, id primitive.ObjectID) error
 }
 
 type mongoDomainRepo struct {
@@ -316,5 +320,35 @@ func (r *mongoDomainRepo) BatchUpdateSettings(ctx context.Context, ids []primiti
 	update := bson.M{"$set": bson.M{"is_ignored": isIgnored}}
 
 	_, err := r.collection.UpdateMany(ctx, filter, update)
+	return err
+}
+
+// [新增] 實作 Create
+func (r *mongoDomainRepo) Create(ctx context.Context, cert domain.SSLCertificate) error {
+	// 如果沒有 ID，生成一個
+	if cert.ID.IsZero() {
+		cert.ID = primitive.NewObjectID()
+	}
+	// 寫入資料庫
+	_, err := r.collection.InsertOne(ctx, cert)
+	return err
+}
+
+// [新增] 實作 GetByID
+func (r *mongoDomainRepo) GetByID(ctx context.Context, id primitive.ObjectID) (*domain.SSLCertificate, error) {
+	var cert domain.SSLCertificate
+	filter := bson.M{"_id": id}
+
+	err := r.collection.FindOne(ctx, filter).Decode(&cert)
+	if err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}
+
+// [新增] 實作 Delete
+func (r *mongoDomainRepo) Delete(ctx context.Context, id primitive.ObjectID) error {
+	filter := bson.M{"_id": id}
+	_, err := r.collection.DeleteOne(ctx, filter)
 	return err
 }

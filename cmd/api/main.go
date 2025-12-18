@@ -97,6 +97,8 @@ func main() {
 		v1.GET("/stats", domainHandler.GetStatistics)                         // [新增] 獲取儀表板數據
 		v1.POST("/domains/batch-settings", domainHandler.BatchUpdateSettings) // [新增] 批量更新
 		v1.GET("/domains/export", domainHandler.ExportDomains)                // [新增] 匯出
+		v1.POST("/domains", domainHandler.AddDomain)                          // [新增]
+		v1.DELETE("/domains/:id", domainHandler.DeleteDomain)                 // [新增]
 	}
 
 	// 5. Start Server

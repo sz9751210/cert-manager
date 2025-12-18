@@ -224,3 +224,104 @@ func (n *NotifierService) sendTelegram(token, chatID, message string) error {
 	}
 	return nil
 }
+
+// 定義事件類型常數
+type EventType string
+
+const (
+	EventAdd    EventType = "ADD"
+	EventDelete EventType = "DELETE"
+	EventRenew  EventType = "RENEW"
+)
+
+// 定義給操作模板用的資料結構
+type OperationTemplateData struct {
+	Action  string // 動作名稱 (中文)
+	Domain  string // 對象域名
+	Details string // 額外詳情
+	Time    string // 發生時間
+}
+
+// 預設模板 (Fallback)
+const (
+	defaultAddTpl    = "✨ <b>[新增域名]</b>\n對象: {{.Domain}}\n詳情: {{.Details}}"
+	defaultDeleteTpl = "🗑 <b>[刪除域名]</b>\n對象: {{.Domain}}\n詳情: {{.Details}}"
+	defaultRenewTpl  = "♻️ <b>[SSL 續簽]</b>\n對象: {{.Domain}}\n結果: {{.Details}}"
+)
+
+// NotifyOperation 發送操作類型的告警
+// action: 動作名稱 (e.g., "新增域名", "刪除域名")
+// target: 操作對象 (e.g., "example.com")
+// details: 額外資訊 (e.g., "由 admin 操作", "IP: 127.0.0.1")
+func (n *NotifierService) NotifyOperation(ctx context.Context, eventType EventType, domainName, details string) {
+	// 1. 取得設定
+	settings, err := n.Repo.GetSettings(ctx)
+	if err != nil || !settings.TelegramEnabled {
+		return
+	}
+
+	// 2. 根據事件類型，決定 "是否發送" 以及 "使用哪個模板"
+	var enabled bool
+	var tmplStr string
+	var actionName string
+
+	switch eventType {
+	case EventAdd:
+		enabled = settings.NotifyOnAdd
+		tmplStr = settings.NotifyOnAddTemplate
+		if tmplStr == "" {
+			tmplStr = defaultAddTpl
+		}
+		actionName = "新增域名"
+	case EventDelete:
+		enabled = settings.NotifyOnDelete
+		tmplStr = settings.NotifyOnDeleteTemplate
+		if tmplStr == "" {
+			tmplStr = defaultDeleteTpl
+		}
+		actionName = "刪除域名"
+	case EventRenew:
+		enabled = settings.NotifyOnRenew
+		tmplStr = settings.NotifyOnRenewTemplate
+		if tmplStr == "" {
+			tmplStr = defaultRenewTpl
+		}
+		actionName = "SSL 續簽"
+	default:
+		return // 未知事件不處理
+	}
+
+	// 如果使用者關閉了此類通知，直接退出
+	if !enabled {
+		return
+	}
+
+	// 3. 渲染模板
+	data := OperationTemplateData{
+		Action:  actionName,
+		Domain:  domainName,
+		Details: details,
+		Time:    time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	t, err := template.New("op").Parse(tmplStr)
+	if err != nil {
+		logrus.Errorf("模板解析失敗: %v", err)
+		return
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		logrus.Errorf("模板渲染失敗: %v", err)
+		return
+	}
+
+	msg := buf.String()
+	// 3. 發送 (非同步執行，避免卡住 API 回應)
+	go func() {
+		n.sendTelegram(settings.TelegramBotToken, settings.TelegramChatID, msg)
+		// 如果有 webhook 也可以順便發
+		if settings.WebhookEnabled && settings.WebhookURL != "" {
+			n.sendWebhook(settings.WebhookURL, msg) // 注意：Webhook 可能需要 JSON 格式，這裡視您之前的實作而定
+		}
+	}()
+}

@@ -19,4 +19,18 @@ type NotificationSettings struct {
 	// 如果為空字串，則使用系統預設模板
 	TelegramTemplate string `bson:"telegram_template" json:"telegram_template"`
 	WebhookTemplate  string `bson:"webhook_template" json:"webhook_template"`
+
+	// --- [新增] 操作通知設定 ---
+
+	// 1. 新增域名 (Add Domain)
+	NotifyOnAdd         bool   `bson:"notify_on_add" json:"notify_on_add"`
+	NotifyOnAddTemplate string `bson:"notify_on_add_tpl" json:"notify_on_add_tpl"`
+
+	// 2. 刪除域名 (Delete Domain)
+	NotifyOnDelete         bool   `bson:"notify_on_delete" json:"notify_on_delete"`
+	NotifyOnDeleteTemplate string `bson:"notify_on_delete_tpl" json:"notify_on_delete_tpl"`
+
+	// 3. 續簽/更新 (Renew / Update)
+	NotifyOnRenew         bool   `bson:"notify_on_renew" json:"notify_on_renew"`
+	NotifyOnRenewTemplate string `bson:"notify_on_renew_tpl" json:"notify_on_renew_tpl"`
 }

@@ -55,6 +55,11 @@ func (h *DomainHandler) SyncDomains(c *gin.Context) {
 		}
 	}
 
+	// [新增] 發送操作通知：同步完成
+	// 這裡我們使用 EventAdd 類型，或者您可以定義一個新的 EventSync
+	details := fmt.Sprintf("同步來源: Cloudflare, 成功數量: %d", count)
+	h.Notifier.NotifyOperation(c.Request.Context(), service.EventAdd, "Cloudflare Sync", details)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "同步完成",
 		"total":   count,
@@ -198,10 +203,14 @@ func (h *DomainHandler) RenewCertificate(c *gin.Context) {
 
 	// 非同步執行，因為申請憑證可能要 10-30 秒
 	go func() {
+		ctx := context.Background()
+
 		if err := h.Acme.RenewCertificate(context.Background(), req.Domain); err != nil {
 			logrus.Errorf("續簽失敗 %s: %v", req.Domain, err)
+			h.Notifier.NotifyOperation(ctx, service.EventRenew, req.Domain, "失敗: "+err.Error())
 		} else {
 			logrus.Infof("續簽成功 %s", req.Domain)
+			h.Notifier.NotifyOperation(ctx, service.EventRenew, req.Domain, "結果: 憑證已更新成功")
 		}
 	}()
 
@@ -254,6 +263,18 @@ func (h *DomainHandler) BatchUpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// [新增] 發送告警：批量操作
+	// 這裡我們可以借用 EventDelete 的模板，或是看作一種更新
+	actionType := "批量開啟監控"
+	if req.IsIgnored {
+		actionType = "批量忽略/停止監控"
+	}
+
+	details := fmt.Sprintf("動作: %s, 影響數量: %d 個域名", actionType, len(objectIDs))
+
+	// 這裡暫時用 EventAdd 或自定義的類型，顯示在模板中
+	h.Notifier.NotifyOperation(c.Request.Context(), service.EventAdd, "Multiple Domains", details)
+
 	c.JSON(http.StatusOK, gin.H{"message": "批量更新成功"})
 }
 
@@ -292,4 +313,54 @@ func (h *DomainHandler) ExportDomains(c *gin.Context) {
 		})
 	}
 	writer.Flush()
+}
+
+// [新增] 手動新增域名 API
+func (h *DomainHandler) AddDomain(c *gin.Context) {
+	var req domain.SSLCertificate
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	// 呼叫 Repo 建立
+	if err := h.Repo.Create(c.Request.Context(), req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// [新增] 發送告警：新增域名
+	details := fmt.Sprintf("來源: 手動新增, IP: %s", c.ClientIP())
+	h.Notifier.NotifyOperation(c.Request.Context(), service.EventAdd, req.DomainName, details)
+
+	c.JSON(http.StatusOK, gin.H{"message": "新增成功"})
+}
+
+// [新增] 刪除域名 API
+func (h *DomainHandler) DeleteDomain(c *gin.Context) {
+	id := c.Param("id")
+	oid, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		return
+	}
+
+	// 1. 先查詢要刪除的域名資料 (為了在通知中顯示名稱，不然刪了就不知道是誰了)
+	domainCert, err := h.Repo.GetByID(c.Request.Context(), oid)
+	domainName := "Unknown"
+	if err == nil {
+		domainName = domainCert.DomainName
+	}
+
+	// 2. 執行刪除
+	if err := h.Repo.Delete(c.Request.Context(), oid); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 3. [新增] 發送告警：刪除域名
+	details := fmt.Sprintf("操作者 IP: %s", c.ClientIP())
+	h.Notifier.NotifyOperation(c.Request.Context(), service.EventDelete, domainName, details)
+
+	c.JSON(http.StatusOK, gin.H{"message": "刪除成功"})
 }
