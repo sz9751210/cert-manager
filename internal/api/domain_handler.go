@@ -40,29 +40,81 @@ func NewDomainHandler(r repository.DomainRepository, c *service.CloudflareServic
 // @Success 200 {object} map[string]string
 // @Router /api/v1/domains/sync [post]
 func (h *DomainHandler) SyncDomains(c *gin.Context) {
-	// 呼叫 Service 去抓 Cloudflare 資料
-	domains, err := h.CFService.FetchDomains(c.Request.Context())
+	ctx := c.Request.Context()
+
+	// 1. 從 Cloudflare 拉取最新資料 (這是基準)
+	cfDomains, err := h.CFService.FetchDomains(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Cloudflare API Error: " + err.Error()})
 		return
 	}
 
-	// 寫入資料庫
-	count := 0
-	for _, d := range domains {
-		if err := h.Repo.Upsert(c.Request.Context(), d); err == nil {
-			count++
+	// 2. 從 MongoDB 拉取目前所有的域名資料 (為了比對刪除)
+	// 注意：這裡需要 Repo 支援 ListAll (不分頁)，或者您把 limit 設很大
+	dbDomains, _, err := h.Repo.List(ctx, 1, 100000, "", "", "", "false", "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB Error: " + err.Error()})
+		return
+	}
+
+	// 3. 建立比對 Map
+	// dbMap: key=DomainName, value=ExistingObject
+	dbMap := make(map[string]domain.SSLCertificate)
+	for _, d := range dbDomains {
+		dbMap[d.DomainName] = d
+	}
+
+	// cfMap: 用來記錄哪些 Cloudflare 域名是存在的，方便後續檢查刪除
+	cfMap := make(map[string]bool)
+
+	addedCount := 0
+	updatedCount := 0
+	deletedCount := 0
+
+	// --- A. 處理新增與更新 ---
+	for _, cfD := range cfDomains {
+		cfMap[cfD.DomainName] = true
+
+		if _, exists := dbMap[cfD.DomainName]; !exists {
+			// [新增邏輯] Cloudflare 有，DB 沒有 -> 新增
+			if err := h.Repo.Create(ctx, cfD); err == nil {
+				addedCount++
+				// 🔥 觸發「新增子域名」通知
+				// 這裡的 details 可以放解析出來的 IP 或 Zone ID
+				h.Notifier.NotifyOperation(ctx, service.EventAdd, cfD.DomainName, "來源: Cloudflare 同步發現新域名")
+			}
+		} else {
+			// [更新邏輯] 兩邊都有 -> 更新
+			// 這裡通常不發通知，除非您想知道屬性變更
+			h.Repo.Upsert(ctx, cfD)
+			updatedCount++
 		}
 	}
 
-	// [新增] 發送操作通知：同步完成
-	// 這裡我們使用 EventAdd 類型，或者您可以定義一個新的 EventSync
-	details := fmt.Sprintf("同步來源: Cloudflare, 成功數量: %d", count)
-	h.Notifier.NotifyOperation(c.Request.Context(), service.EventAdd, "Cloudflare Sync", details)
+	// --- B. 處理刪除 (Cloudflare 已無，但 DB 還有) ---
+	for _, dbD := range dbDomains {
+		// 如果這個 DB 裡的域名，不在剛剛 Cloudflare 的清單裡，代表被刪除了
+		if !cfMap[dbD.DomainName] {
+			if err := h.Repo.Delete(ctx, dbD.ID); err == nil {
+				deletedCount++
+				// 🔥 觸發「刪除子域名」通知
+				h.Notifier.NotifyOperation(ctx, service.EventDelete, dbD.DomainName, "來源: Cloudflare 同步 (遠端已刪除)")
+			}
+		}
+	}
+
+	// 這裡可以選擇發一個總結，或者因為上面已經發了個別通知，這裡就不發了
+	// 如果一次變動太多 (例如 100 個)，上面的個別通知可能會洗版，建議在 Notifier 做個緩衝 (未來優化)
+
+	summary := fmt.Sprintf("同步完成。新增: %d, 刪除: %d, 更新: %d", addedCount, deletedCount, updatedCount)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "同步完成",
-		"total":   count,
+		"message": summary,
+		"stats": gin.H{
+			"added":   addedCount,
+			"deleted": deletedCount,
+			"updated": updatedCount,
+		},
 	})
 }
 
