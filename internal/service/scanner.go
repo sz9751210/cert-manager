@@ -67,27 +67,34 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 
 	start := time.Now()
 
-	// --- 步驟 1: 檢查 HTTP 存活狀態 (Uptime) ---
-	// 設定較短的 timeout，避免卡住太久
-	httpClient := &http.Client{
-		Timeout: 5 * time.Second,
-		// 因為我們還要單獨測 SSL，這裡的 HTTP 請求先忽略憑證錯誤，專注看能不能連上
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
+	// --- 1. HTTP 檢查 (加入重試) ---
+	// 重試 3 次，初始等待 1 秒
+	err := withRetry(3, 1*time.Second, func() error {
+		httpClient := &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		}
+		resp, err := httpClient.Get("https://" + d.DomainName)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		d.HTTPStatusCode = resp.StatusCode
+		// 如果 HTTP 狀態碼是 5xx，我們也可以視為錯誤並重試 (看您的需求)
+		if resp.StatusCode >= 500 {
+			return fmt.Errorf("server error: %d", resp.StatusCode)
+		}
+		return nil
+	})
 
-	// 嘗試連線 https://...
-	resp, err := httpClient.Get("https://" + d.DomainName)
 	if err != nil {
 		// 如果連不上 (例如 DNS 錯誤或連線被拒)
 		d.HTTPStatusCode = 0
 		// 這裡不一定要設為 Unresolvable，因為可能只是 Web Server 掛了但 IP 還在
 		// 為了簡單，我們先記錄錯誤
-		d.ErrorMsg = fmt.Sprintf("HTTP Error: %v", err)
+		d.ErrorMsg = fmt.Sprintf("HTTP Check Failed: %v", err)
 	} else {
-		d.HTTPStatusCode = resp.StatusCode
-		resp.Body.Close()
+		// HTTP 成功，清除錯誤訊息
 
 		// 如果 HTTP 成功，清除之前的錯誤訊息 (除非 SSL 還有錯)
 		if d.Status != domain.StatusExpired {
@@ -98,55 +105,62 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 	// 計算延遲
 	d.Latency = time.Since(start).Milliseconds()
 
-	dialer := &net.Dialer{
-		Timeout: 5 * time.Second,
-	}
+	// --- 2. TLS/SSL 檢查 (加入重試) ---
+	// 這一步最重要，避免 SSL 握手失敗導致誤判
+	err = withRetry(3, 1*time.Second, func() error {
+		dialer := &net.Dialer{Timeout: 5 * time.Second}
+		conn, err := tls.DialWithDialer(dialer, "tcp", d.DomainName+":443", &tls.Config{
+			InsecureSkipVerify: true,
+		})
+		if err != nil {
+			logrus.Warnf("連線失敗 %s: %v", d.DomainName, err)
+			d.Status = domain.StatusUnresolvable
+			d.ErrorMsg = err.Error()
+			return err
+		} else {
+			defer conn.Close()
 
-	// 建立 TLS 連線 (忽略憑證信任鏈錯誤，因為我們主要只想看日期)
-	conn, err := tls.DialWithDialer(dialer, "tcp", d.DomainName+":443", &tls.Config{
-		InsecureSkipVerify: true,
+			state := conn.ConnectionState()
+			certs := state.PeerCertificates
+
+			// 解析 TLS 版本
+			switch state.Version {
+			case tls.VersionTLS10:
+				d.TLSVersion = "TLS 1.0"
+			case tls.VersionTLS11:
+				d.TLSVersion = "TLS 1.1"
+			case tls.VersionTLS12:
+				d.TLSVersion = "TLS 1.2"
+			case tls.VersionTLS13:
+				d.TLSVersion = "TLS 1.3"
+			default:
+				d.TLSVersion = "Unknown"
+			}
+
+			if len(certs) > 0 {
+				cert := certs[0] // 拿第一張 (Server Certificate)
+				d.Issuer = cert.Issuer.CommonName
+				d.NotBefore = cert.NotBefore
+				d.NotAfter = cert.NotAfter
+				d.DaysRemaining = int(time.Until(cert.NotAfter).Hours() / 24)
+				d.SANs = cert.DNSNames
+				// 判斷狀態
+				if d.DaysRemaining < 0 {
+					d.Status = domain.StatusExpired
+				} else if d.DaysRemaining < 30 {
+					d.Status = domain.StatusWarning
+				} else {
+					d.Status = domain.StatusActive
+				}
+			}
+			return nil
+		}
 	})
 
 	if err != nil {
-		logrus.Warnf("連線失敗 %s: %v", d.DomainName, err)
+		// 只有在重試 3 次都失敗後，才判定為無法解析
 		d.Status = domain.StatusUnresolvable
-		d.ErrorMsg = err.Error()
-	} else {
-		defer conn.Close()
-		state := conn.ConnectionState()
-		certs := conn.ConnectionState().PeerCertificates
-
-		// 解析 TLS 版本
-		switch state.Version {
-		case tls.VersionTLS10:
-			d.TLSVersion = "TLS 1.0"
-		case tls.VersionTLS11:
-			d.TLSVersion = "TLS 1.1"
-		case tls.VersionTLS12:
-			d.TLSVersion = "TLS 1.2"
-		case tls.VersionTLS13:
-			d.TLSVersion = "TLS 1.3"
-		default:
-			d.TLSVersion = "Unknown"
-		}
-
-		if len(certs) > 0 {
-			cert := certs[0] // 拿第一張 (Server Certificate)
-
-			d.Issuer = cert.Issuer.CommonName
-			d.NotBefore = cert.NotBefore
-			d.NotAfter = cert.NotAfter
-			d.DaysRemaining = int(time.Until(cert.NotAfter).Hours() / 24)
-			d.SANs = cert.DNSNames
-			// 判斷狀態
-			if d.DaysRemaining < 0 {
-				d.Status = domain.StatusExpired
-			} else if d.DaysRemaining < 30 {
-				d.Status = domain.StatusWarning
-			} else {
-				d.Status = domain.StatusActive
-			}
-		}
+		d.ErrorMsg = fmt.Sprintf("SSL Handshake Failed: %v", err)
 	}
 
 	// --- 步驟 3: 網域 Whois 查詢 (新增) ---
@@ -173,4 +187,26 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 		logrus.Errorf("更新資料庫失敗 %s: %v", d.DomainName, err)
 	}
 	s.Notifier.CheckAndNotify(ctx, d)
+}
+
+// 輔助函式：帶有重試機制的執行器
+// attempts: 最大嘗試次數 (例如 3)
+// initialDelay: 初始等待時間 (例如 1秒)
+// operation: 要執行的邏輯，回傳 error 代表失敗
+func withRetry(attempts int, initialDelay time.Duration, operation func() error) error {
+	var err error
+	for i := 0; i < attempts; i++ {
+		if err = operation(); err == nil {
+			return nil // 成功，直接返回
+		}
+
+		// 如果不是最後一次，就等待
+		if i < attempts-1 {
+			// 指數退避: 1s -> 2s -> 4s
+			sleepTime := initialDelay * time.Duration(1<<i)
+			logrus.Warnf("連線失敗，%s 後重試... (錯誤: %v)", sleepTime, err)
+			time.Sleep(sleepTime)
+		}
+	}
+	return err // 最後一次還是失敗，回傳錯誤
 }
