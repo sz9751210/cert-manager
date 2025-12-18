@@ -67,9 +67,15 @@ func (s *ScannerService) checkAndUpdate(ctx context.Context, d domain.SSLCertifi
 
 	start := time.Now()
 
+	// [新增] 解析 IP (為了在通知中顯示)
+	// 這裡簡單取第一個 IPv4
+	ips, err := net.LookupIP(d.DomainName)
+	if err == nil && len(ips) > 0 {
+		d.ResolvedIP = ips[0].String()
+	}
 	// --- 1. HTTP 檢查 (加入重試) ---
 	// 重試 3 次，初始等待 1 秒
-	err := withRetry(3, 1*time.Second, func() error {
+	err = withRetry(3, 1*time.Second, func() error {
 		httpClient := &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},

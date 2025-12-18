@@ -7,11 +7,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
-
 	"github.com/sirupsen/logrus"
+	"net/http"
+	"text/template"
+	"time"
 )
+
+// 定義給模板用的資料結構 (Context)
+// 這裡定義變數名稱，使用者在模板裡就是用這些名字，例如 {{.Domain}}
+type TemplateData struct {
+	Domain     string
+	Status     string
+	Days       int
+	ExpiryDate string
+	Issuer     string
+	IP         string
+	TLS        string
+	HTTPCode   int
+}
+
+// 輔助函式：渲染模板
+func renderMessage(tmplStr string, cert domain.SSLCertificate) (string, error) {
+	// 準備資料
+	data := TemplateData{
+		Domain:     cert.DomainName,
+		Status:     string(cert.Status),
+		Days:       cert.DaysRemaining,
+		ExpiryDate: cert.NotAfter.Format("2006-01-02"),
+		Issuer:     cert.Issuer,
+		IP:         cert.ResolvedIP,
+		TLS:        cert.TLSVersion,
+		HTTPCode:   cert.HTTPStatusCode,
+	}
+
+	// 建立模板
+	tmpl, err := template.New("notify").Parse(tmplStr)
+	if err != nil {
+		return "", err
+	}
+
+	// 渲染
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// 預設模板 (當使用者沒設定時用這個)
+const defaultTelegramTemplate = `
+⚠️ <b>[監控告警]</b>
+域名: {{.Domain}}
+狀態: {{.Status}}
+剩餘: {{.Days}} 天
+到期: {{.ExpiryDate}}
+IP: {{.IP}}
+`
 
 type NotifierService struct {
 	Repo repository.DomainRepository
@@ -58,11 +109,19 @@ func (n *NotifierService) CheckAndNotify(ctx context.Context, cert domain.SSLCer
 		return
 	}
 
-	// 4. 組裝訊息
-	msg := fmt.Sprintf(
-		"⚠️ *[監控告警]*\n域名: `%s`\nSSL 剩餘: %d 天\n網域 剩餘: %d 天\n狀態: %s",
-		cert.DomainName, cert.DaysRemaining, cert.DomainDaysLeft, cert.Status,
-	)
+	// 2. 決定使用的模板
+	tmpl := settings.TelegramTemplate
+	if tmpl == "" {
+		tmpl = defaultTelegramTemplate
+	}
+
+	// 3. 渲染訊息
+	msg, err := renderMessage(tmpl, cert)
+	if err != nil {
+		// 如果渲染失敗 (例如使用者語法打錯)，降級回預設文字，避免發不出告警
+		msg = fmt.Sprintf("告警: %s 過期 (模板錯誤)", cert.DomainName)
+	}
+
 	// 5. 依序發送各管道
 	sentCount := 0
 

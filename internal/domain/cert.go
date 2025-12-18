@@ -50,4 +50,6 @@ type SSLCertificate struct {
 	// [新增] 網域註冊資訊
 	DomainExpiryDate time.Time `bson:"domain_expiry_date" json:"domain_expiry_date"`
 	DomainDaysLeft   int       `bson:"domain_days_left" json:"domain_days_left"`
+
+	ResolvedIP string `bson:"resolved_ip" json:"resolved_ip"` // [新增] 解析後的 IP
 }

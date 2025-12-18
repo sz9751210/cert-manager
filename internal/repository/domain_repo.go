@@ -242,6 +242,7 @@ func (r *mongoDomainRepo) UpdateCertInfo(ctx context.Context, cert domain.SSLCer
 			"latency":            cert.Latency,
 			"domain_expiry_date": cert.DomainExpiryDate,
 			"domain_days_left":   cert.DomainDaysLeft,
+			"resolved_ip":        cert.ResolvedIP,
 		},
 	}
 

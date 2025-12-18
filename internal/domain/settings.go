@@ -14,4 +14,9 @@ type NotificationSettings struct {
 	AcmeEmail      string `bson:"acme_email" json:"acme_email"`
 	AcmePrivateKey string `bson:"acme_private_key" json:"acme_private_key"` // 存 PEM 格式
 	AcmeRegData    string `bson:"acme_reg_data" json:"acme_reg_data"`       // 存註冊資訊 JSON
+
+	// [新增] 自定義模板
+	// 如果為空字串，則使用系統預設模板
+	TelegramTemplate string `bson:"telegram_template" json:"telegram_template"`
+	WebhookTemplate  string `bson:"webhook_template" json:"webhook_template"`
 }
