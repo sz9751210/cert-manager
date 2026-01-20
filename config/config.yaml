@@ -1,9 +1,0 @@
-server:
-  port: ":8080"
-
-mongodb:
-  uri: "mongodb://localhost:27017"
-  database: "cert_manager_db"
-
-cloudflare:
-  api_token: ""
